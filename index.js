@@ -1,5 +1,4 @@
 var glslify = require("glslify");
-var createVAO = require("gl-vao");
 var createShader = require("gl-shader");
 var createBuffer = require("gl-buffer");
 var flyCamera = require("gl-flyCamera");
@@ -11,9 +10,8 @@ var stats = new Stats();
 document.body.appendChild( stats.dom );
 
 controls = new flyCamera({
-	position: [1, 6, 0],
-	movementSpeed: 50,
-	rollSpeed: Math.PI / 4
+	movementSpeed: 0.7,
+	rollSpeed: Math.PI / 3
 });
 controls.start();
 
@@ -40,10 +38,11 @@ function renderLoop(timeStamp){
 	var dt = timeStamp - lastTimeStamp;
 	lastTimeStamp = timeStamp;
 
-	if (ellapsedTime < 5000 && dt > 30.0){
+	if (ellapsedTime < 5000 && dt > 45.0){
 		quality = quality - 0.01;
 		resizeCanvas(quality);
 	}
+
 	renderOpts.dt = dt;
 	gl.render(renderOpts);
 	window.requestAnimationFrame(renderLoop);
@@ -65,12 +64,23 @@ window.addEventListener( "resize", function(){
 
 
 
-
-
-
-
 var shader, buffer, controls;
 function init(gl){
+
+
+
+	//Create full screen vertex buffer
+	buffer = createBuffer(gl, [
+		// First triangle:
+		 1.0,  1.0,
+		-1.0,  1.0,
+		-1.0, -1.0,
+		// Second triangle:
+		-1.0, -1.0,
+		 1.0, -1.0,
+		 1.0,  1.0
+	]);
+
 
 	//Create shader
 	shader = createShader(
@@ -82,9 +92,7 @@ function init(gl){
 			transform: ["glslify-hex"]
 		})
 	);
-
-	//Create full screen vertex buffer
-	buffer = createBuffer(gl, [-1, -1, -1, 4, 4, -1]);
+	shader.attributes.position.location = 0
 
 	return {
 		buffer: buffer,
@@ -98,7 +106,6 @@ function render(gl, opts){
 	var shader = opts.shader;
 	var buffer = opts.buffer;
 
-	controls.update(opts.dt);
 	stats.begin();
 
 	//Bind shader
@@ -111,9 +118,9 @@ function render(gl, opts){
 	shader.attributes.position.pointer();
 
 	//Set uniforms
-	shader.uniforms.uResolution = [gl.drawingBufferWidth, gl.drawingBufferHeight];
+	shader.uniforms.uResolution = [canvas.width, canvas.height];
 
-	var vectorDir = glMatrix.vec3.fromValues( 0, 0,  -1 );
+	var vectorDir = glMatrix.vec3.fromValues( 0, 0, -1 );
 	glMatrix.vec3.transformQuat( vectorDir, vectorDir, controls.quaternion );
 	glMatrix.vec3.normalize( vectorDir, vectorDir );
 	var vectorUp = glMatrix.vec3.fromValues( 0, 1, 0 );
@@ -124,14 +131,17 @@ function render(gl, opts){
 	shader.uniforms.uCamUp = vectorUp;
 	shader.uniforms.uCamDir = vectorDir;
 
-	shader.uniforms.uContrast = 1.1;
-	shader.uniforms.uSaturation = 1.12;
-	shader.uniforms.uBrightness = 1.3;
-	shader.uniforms.uViewDistance = 700.0;
-	shader.uniforms.uHighDetail = false;
+	shader.uniforms.uGlobalTime += opts.dt / 3000;
+	shader.uniforms.uMinimumDistance = 0.005;
+	shader.uniforms.uNormalDistance = 1.3;
+	shader.uniforms.uAnaglyph = 0;
+	shader.uniforms.uForms = 3;
+	shader.uniforms.uSpaceFolding = 1;
 
 	//Draw
-	gl.drawArrays(gl.TRIANGLES, 0, 3);
+	gl.drawArrays(gl.TRIANGLES, 0, 6);
+
+	controls.update(opts.dt);
 	stats.end();
 }
 

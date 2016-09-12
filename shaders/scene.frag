@@ -1,3 +1,5 @@
+precision mediump float;
+
 uniform float uGlobalTime;
 uniform float uMinimumDistance;
 uniform float uNormalDistance;
@@ -5,12 +7,14 @@ uniform int uAnaglyph;
 uniform int uForms;
 uniform int uSpaceFolding;
 uniform vec2 uResolution;
-uniform samplerCube uChannel0;
+uniform samplerCube uSamplerCube;
+
 uniform vec3 uCamPosition;
 uniform vec3 uCamDir;
 uniform vec3 uCamUp;
 
-varying vec2 vPos;
+varying vec2 uv;
+
 // Kaleidoscopic Journey
 //
 // Mikael Hvidtfeldt Christensen
@@ -23,8 +27,8 @@ varying vec2 vPos;
 // http://creativecommons.org/licenses/by/3.0/
 
 // Decrease this for better performance
-#define Iterations 5
-#define MaxSteps 30
+#define Iterations 7
+#define MaxSteps 70
 #define ColorInterpolateStep 0.4
 #define PI 3.141592
 #define Scale 2.0
@@ -40,8 +44,6 @@ varying vec2 vPos;
 #define LightDir2 vec3(1.0,-0.62886,1.0)
 #define LightColor2 vec3(0.596078,0.635294,1.0)
 
-float time = iGlobalTime;
-
 vec2 rotate(vec2 v, float a) {
 	return vec2(cos(a)*v.x + sin(a)*v.y, -sin(a)*v.x + cos(a)*v.y);
 }
@@ -56,35 +58,35 @@ vec3 getLight(in vec3 color, in vec3 normal, in vec3 dir) {
 	float diffuse2 = max(0.0,dot(-normal, lightDir2)); // Lambertian
 	
 	return
-		 textureCube(iChannel0, reflect(dir, normal)).xyz*Specular+
+		 textureCube(uSamplerCube, reflect(dir, normal)).xyz*Specular+
 		(Specular*specular)*LightColor+(diffuse*Diffuse)*(LightColor*color) +
 		(Specular*specular2)*LightColor2+(diffuse2*Diffuse)*(LightColor2*color);
 }
 
 // Geometric orbit trap. Creates the fractal forms look.
 float trap(vec3 p){
-	if (iForms == 1) return  length(p.x-0.5-0.5*sin(time/10.0)); // <- cube forms 
-	if (iForms == 2) return  length(p.x-1.0); // <-plane forms
-	if (iForms == 3) return length(p.xz-vec2(1.0,1.0))-0.05; // <- tube forms
+	if (uForms == 1) return  length(p.x-0.5-0.5*sin(uGlobalTime/10.0)); // <- cube forms 
+	if (uForms == 2) return  length(p.x-1.0); // <-plane forms
+	if (uForms == 3) return length(p.xz-vec2(1.0,1.0))-0.05; // <- tube forms
 	return length(p); // <- no trap
 }
 
-vec3 offset = vec3(1.0+0.2*(cos(time/5.7)),0.3+0.1*(cos(time/1.7)),1.).xzy;
+vec3 offset = vec3(1.0+0.2*(cos(uGlobalTime/5.7)),0.3+0.1*(cos(uGlobalTime/1.7)),1.).xzy;
 
 // DE: Infinitely tiled Kaleidoscopic IFS. 
 //
 // For more info on KIFS, see: 
-// http://www.fractalforums.com/3d-fractal-generation/kaleidoscopic-%28escape-time-ifs%29/
+// http://www.fractalforums.com/3d-fractal-generation/kaleidoscopic-%28escape-uGlobalTime-ifs%29/
 float DE(in vec3 z)
 {   
 	// Folding 'tiling' of 3D or 2D space;
-	if (iSpaceFolding == 0)z.xy = abs(1.0-mod(z.xy,2.0))+0.2;
-	if (iSpaceFolding == 1) z  = abs(1.0-mod(z,2.0))+0.2;
+	if (uSpaceFolding == 0)z.xy = abs(1.0-mod(z.xy,2.0))+0.2;
+	if (uSpaceFolding == 1) z  = abs(1.0-mod(z,2.0))+0.2;
 	
 	float d = 1000.0;
 	float r;
 	for (int n = 0; n < Iterations; n++) {
-		z.xz = rotate(z.xz, time/18.0);
+		z.xz = rotate(z.xz, uGlobalTime/18.0);
 		
 		// This is octahedral symmetry,
 		// with some 'abs' functions thrown in for good measure.
@@ -96,7 +98,7 @@ float DE(in vec3 z)
 		z = abs(z);
 		if (z.x-z.z<0.0) z.xz = z.zx;
 		z = z*Scale - offset*(Scale-1.0);
-		z.yz = rotate(z.yz, -time/18.0);
+		z.yz = rotate(z.yz, -uGlobalTime/18.0);
 		
 		d = min(d, trap(z) * pow(Scale, -float(n+1)));
 	}
@@ -105,7 +107,7 @@ float DE(in vec3 z)
 
 // Finite difference normal
 vec3 getNormal(in vec3 pos) {
-	vec3 e = vec3(0.0,iNormalDistance,0.0);
+	vec3 e = vec3(0.0,uNormalDistance,0.0);
 	
 	return normalize(vec3(
 			DE(pos+e.yxx)-DE(pos-e.yxx),
@@ -136,7 +138,7 @@ float rand(vec2 co){
 
 vec4 rayMarch(in vec3 from, in vec3 dir, in vec2 pix) {
 	// Add some noise to prevent banding
-	float totalDistance = Jitter*rand(pix+vec2(time));
+	float totalDistance = Jitter*rand(pix+vec2(uGlobalTime));
 	
 	float distance = 0.0;
 	int steps = 0;
@@ -145,13 +147,13 @@ vec4 rayMarch(in vec3 from, in vec3 dir, in vec2 pix) {
 		pos = from + totalDistance * dir;
 		distance = DE(pos)*FudgeFactor;
 		totalDistance += distance;
-		if (distance < iMinimumDistance){ break; }
+		if (distance < uMinimumDistance){ break; }
 		steps = i;
 	}
 	
 	// 'AO' is based on number of steps.
 	// Try to smooth the count, to combat banding.
-	float smoothStep = float(steps) + float(distance/iMinimumDistance);
+	float smoothStep = float(steps) + float(distance/uMinimumDistance);
 	float temp = (smoothStep/float(MaxSteps));
 	//float ao = 1.0 - abs(temp);
 	float ao = 1.0 - clamp(temp, 0.0, 1.0);
@@ -159,7 +161,7 @@ vec4 rayMarch(in vec3 from, in vec3 dir, in vec2 pix) {
 
 	// Since our distance field is not signed,
 	// backstep when calc'ing normal
-	vec3 normal = getNormal(pos-dir*iNormalDistance*3.0);
+	vec3 normal = getNormal(pos-dir*uNormalDistance*3.0);
 	vec3 color = getColor(normal);
 	vec3 light = getLight(color, normal, dir);
 	
@@ -179,29 +181,28 @@ void main(void)
 {
 	
 	// first texture row is frequency data
-	//float fft  = texture2D( iChannel1, vec2(vUv.x,0.25) ).x; 
+	//float fft  = texture2D( iChannel1, vec2(vPos.x,0.25) ).x; 
 	
 	// second texture row is the sound wave
-	//float wave = texture2D( iChannel1, vec2(vUv.x,0.75) ).x;
-	
-	vec2 coord =(-1.0 + 2.0 *vUv);
-	coord.x *= iResolution.x/iResolution.y;
-	//coord.y *= iResolution.y/iResolution.x;
+	//float wave = texture2D( iChannel1, vec2(vPos.x,0.75) ).x;
+
+	vec2 coord = uv;
+	coord.x *= uResolution.x / uResolution.y;
 	
 	bool isCyan;
-	if(iAnaglyph == 1){
+	if(uAnaglyph == 1){
 		isCyan = 0.5<mod(gl_FragCoord.xy.x,2.0);
 		if(.5<mod(gl_FragCoord.xy.y,2.0)){ isCyan = !isCyan; }
 	}
 	
 	
 	// Camera position (eye), and camera target
-	vec3 camPos = vec3(iCamPosition.x,iCamPosition.y,iCamPosition.z);
-	if(iAnaglyph == 1){
-		if(isCyan)camPos = vec3(iCamPosition.x + 0.05,iCamPosition.y,iCamPosition.z);
+	vec3 camPos = vec3(uCamPosition.x,uCamPosition.y,uCamPosition.z);
+	if(uAnaglyph == 1){
+		if(isCyan)camPos = vec3(uCamPosition.x + 0.05,uCamPosition.y,uCamPosition.z);
 	}
-	vec3 target = camPos+vec3(iCamDir.x,iCamDir.y,iCamDir.z);
-	vec3 camUp  = vec3(iCamUp.x,iCamUp.y,iCamUp.z);
+	vec3 target = camPos+vec3(uCamDir.x,uCamDir.y,uCamDir.z);
+	vec3 camUp  = vec3(uCamUp.x,uCamUp.y,uCamUp.z);
 	
 	// Calculate orthonormal camera reference system
 	vec3 camDir   = normalize(target-camPos); // direction for center ray
@@ -215,7 +216,7 @@ void main(void)
 	vec4 col = rayMarch(camPos, rayDir, gl_FragCoord.xy );
 	
 	gl_FragColor = col;
-	if(iAnaglyph == 1){
+	if(uAnaglyph == 1){
 		if(isCyan)
 			gl_FragColor=vec4(0.0,col.gb,1.0);
 		else

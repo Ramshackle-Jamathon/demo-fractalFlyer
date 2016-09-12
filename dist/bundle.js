@@ -1,6 +1,5 @@
 (function e(t,n,r){function s(o,u){if(!n[o]){if(!t[o]){var a=typeof require=="function"&&require;if(!u&&a)return a(o,!0);if(i)return i(o,!0);var f=new Error("Cannot find module '"+o+"'");throw f.code="MODULE_NOT_FOUND",f}var l=n[o]={exports:{}};t[o][0].call(l.exports,function(e){var n=t[o][1][e];return s(n?n:e)},l,l.exports,e,t,n,r)}return n[o].exports}var i=typeof require=="function"&&require;for(var o=0;o<r.length;o++)s(r[o]);return s})({1:[function(require,module,exports){
 
-var createVAO = require("gl-vao");
 var createShader = require("gl-shader");
 var createBuffer = require("gl-buffer");
 var flyCamera = require("gl-flyCamera");
@@ -12,9 +11,8 @@ var stats = new Stats();
 document.body.appendChild( stats.dom );
 
 controls = new flyCamera({
-	position: [1, 6, 0],
-	movementSpeed: 50,
-	rollSpeed: Math.PI / 4
+	movementSpeed: 0.7,
+	rollSpeed: Math.PI / 3
 });
 controls.start();
 
@@ -41,10 +39,11 @@ function renderLoop(timeStamp){
 	var dt = timeStamp - lastTimeStamp;
 	lastTimeStamp = timeStamp;
 
-	if (ellapsedTime < 5000 && dt > 30.0){
+	if (ellapsedTime < 5000 && dt > 45.0){
 		quality = quality - 0.01;
 		resizeCanvas(quality);
 	}
+
 	renderOpts.dt = dt;
 	gl.render(renderOpts);
 	window.requestAnimationFrame(renderLoop);
@@ -66,22 +65,31 @@ window.addEventListener( "resize", function(){
 
 
 
-
-
-
-
 var shader, buffer, controls;
 function init(gl){
+
+
+
+	//Create full screen vertex buffer
+	buffer = createBuffer(gl, [
+		// First triangle:
+		 1.0,  1.0,
+		-1.0,  1.0,
+		-1.0, -1.0,
+		// Second triangle:
+		-1.0, -1.0,
+		 1.0, -1.0,
+		 1.0,  1.0
+	]);
+
 
 	//Create shader
 	shader = createShader(
 		gl,
-		"precision mediump float;\n#define GLSLIFY 1\n\nattribute vec2 position;\n\nvarying vec2 vPos;\n\nvoid main() {\n  gl_Position = vec4(position, 0, 1);\n  vPos = position;\n}",
-		"precision mediump float;\n#define GLSLIFY 1\n// Lorn Landscape Fragment Shader\n// License Creative Commons Attribution-NonCommercial-ShareAlike 3.0 Unported License.\n// It uses binary subdivision to accurately find the height map.\n// Lots of thanks to Iñigo(IQ) for his noise functions and David Hoskins for his terrain raymarching examples!\n\nuniform vec2 uResolution;\nuniform vec3 uCamPosition;\nuniform vec3 uCamDir;\nuniform vec3 uCamUp;\nuniform float uContrast;\nuniform float uSaturation;\nuniform float uBrightness;\nuniform float uViewDistance;\nuniform int uHighDetail;\n\nvarying vec2 vPos;\n\nvec3 sunLight  = normalize( vec3(  0.4, 0.4,  0.48 ) );\nvec3 sunColour = vec3(1.0, .9, .83);\nfloat specular = 0.0;\nfloat ambient;\nvec2 add = vec2(1.0, 0.0);\n#define MOD2 vec2(3.07965, 7.4235)\n\n// This peturbs the fractal positions for each iteration down...\n// Helps make nice twisted landscapes...\nconst mat2 rotate2D = mat2(1.3623, 1.7531, -1.7131, 1.4623);\n// Alternative rotation:-\n// const mat2 rotate2D = mat2(1.2323, 1.999231, -1.999231, 1.22);\n\n//--------------------------------------------------------------------------\n// IQ's noise functions, super clutch\nfloat Hash12(vec2 p)\n{\n    p  = fract(p / MOD2);\n    p += dot(p.xy, p.yx+19.19);\n    return fract(p.x * p.y);\n}\n\nfloat Noise( in vec2 x )\n{\n    vec2 p = floor(x);\n    vec2 f = fract(x);\n    f = f*f*(3.0-2.0*f);\n    float res = mix(mix( Hash12(p),          Hash12(p + add.xy),f.x),\n                    mix( Hash12(p + add.yx), Hash12(p + add.xx),f.x),f.y);\n    return res;\n}\n\n//--------------------------------------------------------------------------\n// Thanks to IQ for all the noise stuff...\nfloat Terrain(in vec2 p)\n{\n    vec2 pos = p*0.05;\n    float w = (Noise(pos*.25)*0.75+.15);\n    w = 66.0 * w * w;\n    vec2 dxy = vec2(0.0, 0.0);\n    float f = .0;\n    for (int i = 0; i < 5; i++)\n    {\n        f += w * Noise(pos);\n        w = -w * 0.4;   //...Flip negative and positive for variation\n        pos = rotate2D * pos;\n    }\n    if(uHighDetail > 0){\n        float ff = Noise(pos*.002);\n        f += pow(abs(ff), 5.0)*275.-5.0;\n    }\n    return f;\n    //return length(p)-4.0;\n    //return  cos(p.x) * cos(p.y) ;\n}\n//--------------------------------------------------------------------------\n// Map to lower resolution for height field mapping for Scene function...\nfloat Map(in vec3 p)\n{\n    float h = Terrain(p.xz);\n    return p.y - h;\n}\n\n//--------------------------------------------------------------------------\n// Grab all sky information for a given ray from camera\nvec3 GetSky(in vec3 rd)\n{\n    float sunAmount = max( dot( rd, sunLight), 0.0 );\n    float v = pow(0.0-max(rd.y,0.0),5.)*.5;\n    vec3  sky = vec3(v*sunColour.x*0.4+0.18, v*sunColour.y*0.4+0.22, v*sunColour.z*0.4+.4);\n    // Wide glare effect...\n    sky = sky + sunColour * pow(sunAmount, 6.5)*.32;\n    // Actual sun...\n    sky = sky+ sunColour * min(pow(sunAmount, 1150.0), .3)*.65;\n    return sky;\n}\n\n//--------------------------------------------------------------------------\n// Merge mountains into the sky background for correct disappearance...\nvec3 ApplyFog( in vec3  rgb, in float dis, in vec3 dir)\n{\n    float fogAmount = exp(-dis* 0.00005);\n    return mix((GetSky(dir)),   (rgb), (fogAmount) );\n}\n\n//--------------------------------------------------------------------------\n// Calculate sun light...\nvoid DoLighting(inout vec3 mat, in vec3 pos, in vec3 normal, in vec3 eyeDir, in float dis)\n{\n    float h = dot(sunLight,normal);\n    float c = max(h, 0.0)+ambient;\n    mat = mat * sunColour * c ;\n    // Specular...\n    if (h > 0.0)\n    {\n        vec3 R = reflect(sunLight, normal);\n        float specAmount = pow( max(dot(R, normalize(eyeDir)), 0.0), 3.0)*specular;\n        mat = mix(mat, sunColour, specAmount);\n    }\n}\n\n//--------------------------------------------------------------------------\n// Hack the height, position, and normal data to create the coloured landscape\nvec3 TerrainColour(vec3 pos, vec3 normal, float dis)\n{\n    vec3 mat;\n    specular = .0;\n    ambient = .1;\n    vec3 dir = normalize(pos-uCamPosition);\n    \n    vec3 matPos = pos * 2.0;// ... I had change scale halfway though, this lazy multiply allow me to keep the graphic scales I had\n\n    float disSqrd = dis * dis;// Squaring it gives better distance scales.\n  \n    float f = clamp(Noise(matPos.xz*.05), 0.0,1.0);//*10.8;\n    f += Noise(matPos.xz*.1+normal.yz*1.08)*.85;\n\n    //feelin da beat\n    vec3 m = mix(vec3(.63*f+.2, .7*f+.1, .7*f+.1), vec3(f*.43+.1, f*.3+.2, f*.35+.1), f);\n    mat = m*vec3(f*m.x+.36, f*m.y+.30, f*m.z+.28);\n\n    //lighting\n    DoLighting(mat, pos, normal,dir, disSqrd);\n    \n    // Do the \"water\"\n    if (matPos.y < 0.0)\n    {\n        vec3 watPos = matPos;\n        mat = mix(mat, vec3(.5,.6,1.0)*.7, clamp((watPos.y-matPos.y)*.35, .1, .9));\n    }\n    \n    //fog\n    float fogAmount = exp(-dis* 0.002);\n    mat = mix(vec3(.5,.6,1.0), normalize(mat), fogAmount );\n\n    return mat;\n}\n\n//--------------------------------------------------------------------------\nfloat BinarySubdivision(in vec3 rO, in vec3 rD, vec2 t)\n{\n    // Home in on the surface by dividing by two and split...\n    float halfwayT;\n    for (int n = 0; n < 4; n++)\n    {\n        halfwayT = (t.x + t.y) * .5;\n        vec3 p = rO + halfwayT*rD;\n        if (Map(p) < 0.5)\n        {\n            t.x = halfwayT;\n        }else\n        {\n            t.y = halfwayT;\n        }\n    }\n    return t.x;\n}\n\n//--------------------------------------------------------------------------\n//Where Raymarching occurs\n//https://en.wikipedia.org/wiki/Volume_ray_casting\n//1. cast *single* ray in direction rD with orientation rO\n//2. interpolate along line until close to surface\n//3. calculate hit samples (binary subdivision) things get funky here\n// returns bool fin (hit/miss) and resT (the distance along the cast ray)\nbool Scene(in vec3 rO, in vec3 rD, out float resT, in vec2 fragCoord )\n{\n    float t = 1.2 + Hash12(fragCoord.xy);\n    float oldT = 0.0;\n    float delta = 0.0;\n    bool fin = false;\n    bool res = false;\n    vec2 distances;\n    for( int j=0; j< 300; j++ )\n    {\n        if (fin || t > uViewDistance) break;\n        vec3 p = rO + t*rD;\n        float h = Map(p); // ...Get this positions height mapping.\n        // Are we inside, and close enough to fudge a hit?...\n        if(h < 0.001)\n        {\n            fin = true;\n            distances = vec2(t, oldT);\n            break;\n        }\n        // Delta ray advance - a fudge between the height returned\n        // and the distance already travelled.\n        // It's a really fiddly compromise between speed and accuracy\n        // Too large a step and the tops of ridges get missed.\n        delta = max(0.01, 0.3*h) + (t*0.00085);\n        oldT = t;\n        t += delta;\n    }\n    if (fin) resT = BinarySubdivision(rO, rD, distances);\n\n    return fin;\n}\n\n//--------------------------------------------------------------------------\n// Some would say, most of the magic is done in post! :D\nvec3 PostEffects(vec3 rgb, vec2 uv)\n{\n    return mix(vec3(.5), mix(vec3(dot(vec3(.2125, .7154, .0721), rgb*uBrightness)), rgb*uBrightness, uSaturation), uContrast);\n}\n\n//--------------------------------------------------------------------------\nvoid main()\n{\n    vec2 uv =(-1.0 + 2.0 * vPos); // get fragment location\n    uv.x *= uResolution.x / uResolution.y;// correct for aspect ratio\n\n    //camera vectors (position, look, up)\n    vec3 cPos = vec3(uCamPosition.x,uCamPosition.y,uCamPosition.z);\n    cPos.y = max(cPos.y, Terrain(cPos.xz) + 2.0);\n    vec3 cUp  = vec3(uCamUp.x,uCamUp.y,uCamUp.z);\n    vec3 cLook = cPos+vec3(uCamDir.x,uCamDir.y,uCamDir.z);\n    \n    // camera matrix\n    vec3 ww = normalize( cLook-cPos );\n    vec3 uu = normalize( cross(ww, cUp) );\n    vec3 vv = normalize( cross(uu, ww) );\n    \n    vec3 rd = normalize( uv.x*uu + uv.y*vv + 4.0*ww ); //direction of our ray\n\n    vec3 col;\n    float distance;\n    if( !Scene(cPos,rd, distance, vPos) )\n    {\n        col = GetSky(rd); // Missed scene, now just get the sky value...\n    }\n    else\n    {\n        // Get world coordinate of landscape...\n        vec3 pos = cPos + distance * rd;\n        // Get normal from sampling the high definition height map\n        // Use the distance to sample larger gaps to help stop aliasing...\n        float p = min(.3, .0005+.00005 * distance*distance);\n        vec3 nor    = vec3(0.0,         Terrain(pos.xz), 0.0);\n        vec3 v2     = nor-vec3(p,       Terrain(pos.xz+vec2(p,0.0)), 0.0);\n        vec3 v3     = nor-vec3(0.0,     Terrain(pos.xz+vec2(0.0,-p)), -p);\n        nor = cross(v2, v3);\n        nor = normalize(nor);\n\n        // Get the colour using all available data...\n        col = TerrainColour(pos, nor, distance);\n    }\n\n    col = PostEffects(col, uv);\n    \n    gl_FragColor=vec4(col,1.0);\n}\n\n//--------------------------------------------------------------------------"
+		"precision mediump float;\n#define GLSLIFY 1\n\nattribute vec2 position;\n\nvarying vec2 uv;\n\nvoid main() {\n\tgl_Position = vec4(position, 0, 1);\n\tuv = position.xy;\n}",
+		"precision mediump float;\n#define GLSLIFY 1\n\nuniform float uGlobalTime;\nuniform float uMinimumDistance;\nuniform float uNormalDistance;\nuniform int uAnaglyph;\nuniform int uForms;\nuniform int uSpaceFolding;\nuniform vec2 uResolution;\nuniform samplerCube uSamplerCube;\n\nuniform vec3 uCamPosition;\nuniform vec3 uCamDir;\nuniform vec3 uCamUp;\n\nvarying vec2 uv;\n\n// Kaleidoscopic Journey\n//\n// Mikael Hvidtfeldt Christensen\n// @SyntopiaDK\n//\n// Edited: Joseph Van Drunen\n//\n// License:\n// Creative Commons Attribution\n// http://creativecommons.org/licenses/by/3.0/\n\n// Decrease this for better performance\n#define Iterations 7\n#define MaxSteps 70\n#define ColorInterpolateStep 0.4\n#define PI 3.141592\n#define Scale 2.0\n#define FieldOfView 1.0\n#define Jitter 0.0\n#define FudgeFactor 1.0\n\n#define Ambient 0.28452\n#define Diffuse 0.57378\n#define Specular 0.07272\n#define LightDir vec3(1.0,1.0,-0.65048)\n#define LightColor vec3(1.0,0.666667,0.0)\n#define LightDir2 vec3(1.0,-0.62886,1.0)\n#define LightColor2 vec3(0.596078,0.635294,1.0)\n\nvec2 rotate(vec2 v, float a) {\n\treturn vec2(cos(a)*v.x + sin(a)*v.y, -sin(a)*v.x + cos(a)*v.y);\n}\n\n// Two light source + env light\nvec3 getLight(in vec3 color, in vec3 normal, in vec3 dir) {\n\tvec3 lightDir = normalize(LightDir);\n\tfloat specular = pow(max(0.0,dot(lightDir,-reflect(lightDir, normal))),20.0); // Phong\n\tfloat diffuse = max(0.0,dot(-normal, lightDir)); // Lambertian\n\tvec3 lightDir2 = normalize(LightDir2);\n\tfloat specular2 = pow(max(0.0,dot(lightDir2,-reflect(lightDir2, normal))),20.0); // Phong\n\tfloat diffuse2 = max(0.0,dot(-normal, lightDir2)); // Lambertian\n\t\n\treturn\n\t\t textureCube(uSamplerCube, reflect(dir, normal)).xyz*Specular+\n\t\t(Specular*specular)*LightColor+(diffuse*Diffuse)*(LightColor*color) +\n\t\t(Specular*specular2)*LightColor2+(diffuse2*Diffuse)*(LightColor2*color);\n}\n\n// Geometric orbit trap. Creates the fractal forms look.\nfloat trap(vec3 p){\n\tif (uForms == 1) return  length(p.x-0.5-0.5*sin(uGlobalTime/10.0)); // <- cube forms \n\tif (uForms == 2) return  length(p.x-1.0); // <-plane forms\n\tif (uForms == 3) return length(p.xz-vec2(1.0,1.0))-0.05; // <- tube forms\n\treturn length(p); // <- no trap\n}\n\nvec3 offset = vec3(1.0+0.2*(cos(uGlobalTime/5.7)),0.3+0.1*(cos(uGlobalTime/1.7)),1.).xzy;\n\n// DE: Infinitely tiled Kaleidoscopic IFS. \n//\n// For more info on KIFS, see: \n// http://www.fractalforums.com/3d-fractal-generation/kaleidoscopic-%28escape-uGlobalTime-ifs%29/\nfloat DE(in vec3 z)\n{   \n\t// Folding 'tiling' of 3D or 2D space;\n\tif (uSpaceFolding == 0)z.xy = abs(1.0-mod(z.xy,2.0))+0.2;\n\tif (uSpaceFolding == 1) z  = abs(1.0-mod(z,2.0))+0.2;\n\t\n\tfloat d = 1000.0;\n\tfloat r;\n\tfor (int n = 0; n < Iterations; n++) {\n\t\tz.xz = rotate(z.xz, uGlobalTime/18.0);\n\t\t\n\t\t// This is octahedral symmetry,\n\t\t// with some 'abs' functions thrown in for good measure.\n\t\tif (z.x+z.y<0.0) z.xy = -z.yx;\n\t\tz = abs(z);\n\t\tif (z.x+z.z<0.0) z.xz = -z.zx;\n\t\tz = abs(z);\n\t\tif (z.x-z.y<0.0) z.xy = z.yx;\n\t\tz = abs(z);\n\t\tif (z.x-z.z<0.0) z.xz = z.zx;\n\t\tz = z*Scale - offset*(Scale-1.0);\n\t\tz.yz = rotate(z.yz, -uGlobalTime/18.0);\n\t\t\n\t\td = min(d, trap(z) * pow(Scale, -float(n+1)));\n\t}\n\treturn d;\n}\n\n// Finite difference normal\nvec3 getNormal(in vec3 pos) {\n\tvec3 e = vec3(0.0,uNormalDistance,0.0);\n\t\n\treturn normalize(vec3(\n\t\t\tDE(pos+e.yxx)-DE(pos-e.yxx),\n\t\t\tDE(pos+e.xyx)-DE(pos-e.xyx),\n\t\t\tDE(pos+e.xxy)-DE(pos-e.xxy)));\n}\n\n// Solid color with a little bit of normal :-)\nvec3 getColor(vec3 normal) {\n\treturn mix(vec3(1.0),abs(normal),ColorInterpolateStep); \n}\n\n// Filmic tone mapping:\n// http://filmicgames.com/archives/75\nvec3 toneMap(in vec3 c) {\n\tc = pow(c,vec3(2.0));\n\tvec3 x = max(vec3(0.0),c-vec3(0.004));\n\tc = (x*(6.2*x+.5))/(x*(6.2*x+1.7)+0.06);\n\treturn c;\n}\n\n// Pseudo-random number\n// From: lumina.sourceforge.net/Tutorials/Noise.html\nfloat rand(vec2 co){\n\treturn fract(cos(dot(co,vec2(4.898,7.23))) * 23421.631);\n}\n\nvec4 rayMarch(in vec3 from, in vec3 dir, in vec2 pix) {\n\t// Add some noise to prevent banding\n\tfloat totalDistance = Jitter*rand(pix+vec2(uGlobalTime));\n\t\n\tfloat distance = 0.0;\n\tint steps = 0;\n\tvec3 pos;\n\tfor (int i=0; i < MaxSteps; i++) {\n\t\tpos = from + totalDistance * dir;\n\t\tdistance = DE(pos)*FudgeFactor;\n\t\ttotalDistance += distance;\n\t\tif (distance < uMinimumDistance){ break; }\n\t\tsteps = i;\n\t}\n\t\n\t// 'AO' is based on number of steps.\n\t// Try to smooth the count, to combat banding.\n\tfloat smoothStep = float(steps) + float(distance/uMinimumDistance);\n\tfloat temp = (smoothStep/float(MaxSteps));\n\t//float ao = 1.0 - abs(temp);\n\tfloat ao = 1.0 - clamp(temp, 0.0, 1.0);\n\t\n\n\t// Since our distance field is not signed,\n\t// backstep when calc'ing normal\n\tvec3 normal = getNormal(pos-dir*uNormalDistance*3.0);\n\tvec3 color = getColor(normal);\n\tvec3 light = getLight(color, normal, dir);\n\t\n\t\n\t\n\t\n\treturn vec4(toneMap((color*Ambient+light)*ao),1.0);\n}\n\nvoid main(void)\n{\n\t\n\t// first texture row is frequency data\n\t//float fft  = texture2D( iChannel1, vec2(vPos.x,0.25) ).x; \n\t\n\t// second texture row is the sound wave\n\t//float wave = texture2D( iChannel1, vec2(vPos.x,0.75) ).x;\n\n\tvec2 coord = uv;\n\tcoord.x *= uResolution.x / uResolution.y;\n\t\n\tbool isCyan;\n\tif(uAnaglyph == 1){\n\t\tisCyan = 0.5<mod(gl_FragCoord.xy.x,2.0);\n\t\tif(.5<mod(gl_FragCoord.xy.y,2.0)){ isCyan = !isCyan; }\n\t}\n\t\n\t\n\t// Camera position (eye), and camera target\n\tvec3 camPos = vec3(uCamPosition.x,uCamPosition.y,uCamPosition.z);\n\tif(uAnaglyph == 1){\n\t\tif(isCyan)camPos = vec3(uCamPosition.x + 0.05,uCamPosition.y,uCamPosition.z);\n\t}\n\tvec3 target = camPos+vec3(uCamDir.x,uCamDir.y,uCamDir.z);\n\tvec3 camUp  = vec3(uCamUp.x,uCamUp.y,uCamUp.z);\n\t\n\t// Calculate orthonormal camera reference system\n\tvec3 camDir   = normalize(target-camPos); // direction for center ray\n\tcamUp = normalize(camUp-dot(camDir,camUp)*camDir); // orthogonalize\n\tvec3 camRight = normalize(cross(camDir,camUp));\n\t\n\t\n\t// Get direction for this pixel\n\tvec3 rayDir = normalize(camDir + (coord.x*camRight + coord.y*camUp)*FieldOfView);\n\t\n\tvec4 col = rayMarch(camPos, rayDir, gl_FragCoord.xy );\n\t\n\tgl_FragColor = col;\n\tif(uAnaglyph == 1){\n\t\tif(isCyan)\n\t\t\tgl_FragColor=vec4(0.0,col.gb,1.0);\n\t\telse\n\t\t\tgl_FragColor=vec4(sqrt(col.r),0.0,0.0,1.0);\n\t}\n\t\n}"
 	);
-
-	//Create full screen vertex buffer
-	buffer = createBuffer(gl, [-1, -1, -1, 4, 4, -1]);
+	shader.attributes.position.location = 0
 
 	return {
 		buffer: buffer,
@@ -95,7 +103,6 @@ function render(gl, opts){
 	var shader = opts.shader;
 	var buffer = opts.buffer;
 
-	controls.update(opts.dt);
 	stats.begin();
 
 	//Bind shader
@@ -108,9 +115,9 @@ function render(gl, opts){
 	shader.attributes.position.pointer();
 
 	//Set uniforms
-	shader.uniforms.uResolution = [gl.drawingBufferWidth, gl.drawingBufferHeight];
+	shader.uniforms.uResolution = [canvas.width, canvas.height];
 
-	var vectorDir = glMatrix.vec3.fromValues( 0, 0,  -1 );
+	var vectorDir = glMatrix.vec3.fromValues( 0, 0, -1 );
 	glMatrix.vec3.transformQuat( vectorDir, vectorDir, controls.quaternion );
 	glMatrix.vec3.normalize( vectorDir, vectorDir );
 	var vectorUp = glMatrix.vec3.fromValues( 0, 1, 0 );
@@ -121,14 +128,17 @@ function render(gl, opts){
 	shader.uniforms.uCamUp = vectorUp;
 	shader.uniforms.uCamDir = vectorDir;
 
-	shader.uniforms.uContrast = 1.1;
-	shader.uniforms.uSaturation = 1.12;
-	shader.uniforms.uBrightness = 1.3;
-	shader.uniforms.uViewDistance = 700.0;
-	shader.uniforms.uHighDetail = false;
+	shader.uniforms.uGlobalTime += opts.dt / 3000;
+	shader.uniforms.uMinimumDistance = 0.005;
+	shader.uniforms.uNormalDistance = 1.3;
+	shader.uniforms.uAnaglyph = 0;
+	shader.uniforms.uForms = 3;
+	shader.uniforms.uSpaceFolding = 1;
 
 	//Draw
-	gl.drawArrays(gl.TRIANGLES, 0, 3);
+	gl.drawArrays(gl.TRIANGLES, 0, 6);
+
+	controls.update(opts.dt);
 	stats.end();
 }
 
@@ -173,7 +183,7 @@ window.addEventListener( "keydown", function (event) {
 	}
 });
 
-},{"gl-buffer":12,"gl-flyCamera":15,"gl-matrix":17,"gl-shader":27,"gl-vao":37,"stats.js":54}],2:[function(require,module,exports){
+},{"gl-buffer":12,"gl-flyCamera":15,"gl-matrix":17,"gl-shader":27,"stats.js":50}],2:[function(require,module,exports){
 var padLeft = require('pad-left')
 
 module.exports = addLineNumbers
@@ -191,7 +201,7 @@ function addLineNumbers (string, start, delim) {
   }).join('\n')
 }
 
-},{"pad-left":51}],3:[function(require,module,exports){
+},{"pad-left":47}],3:[function(require,module,exports){
 module.exports = function _atob(str) {
   return atob(str)
 }
@@ -2306,7 +2316,7 @@ function isnan (val) {
 }
 
 }).call(this,typeof global !== "undefined" ? global : typeof self !== "undefined" ? self : typeof window !== "undefined" ? window : {})
-},{"base64-js":4,"ieee754":46,"isarray":7}],7:[function(require,module,exports){
+},{"base64-js":4,"ieee754":42,"isarray":7}],7:[function(require,module,exports){
 var toString = {}.toString;
 
 module.exports = Array.isArray || function (arr) {
@@ -2780,7 +2790,7 @@ function generateCWiseOp(proc, typesig) {
 }
 module.exports = generateCWiseOp
 
-},{"uniq":56}],10:[function(require,module,exports){
+},{"uniq":52}],10:[function(require,module,exports){
 "use strict"
 
 // The function below is called when constructing a cwise function object, and does the following:
@@ -3072,7 +3082,7 @@ function createBuffer(gl, data, type, usage) {
 
 module.exports = createBuffer
 
-},{"ndarray":50,"ndarray-ops":49,"typedarray-pool":55}],13:[function(require,module,exports){
+},{"ndarray":46,"ndarray-ops":45,"typedarray-pool":51}],13:[function(require,module,exports){
 module.exports = {
   0: 'NONE',
   1: 'ONE',
@@ -3640,7 +3650,7 @@ function formatCompilerError(errLog, src, type) {
 }
 
 
-},{"add-line-numbers":2,"gl-constants/lookup":14,"glsl-shader-name":38,"sprintf-js":53}],17:[function(require,module,exports){
+},{"add-line-numbers":2,"gl-constants/lookup":14,"glsl-shader-name":34,"sprintf-js":49}],17:[function(require,module,exports){
 /**
  * @fileoverview gl-matrix - High performance matrix and vector operations
  * @author Brandon Jones
@@ -11141,219 +11151,7 @@ function createProgram(gl, vref, fref, attribs, locations) {
   return getCache(gl).getProgram(vref, fref, attribs, locations)
 }
 
-},{"./GLError":28,"gl-format-compiler-error":16,"weakmap-shim":59}],34:[function(require,module,exports){
-"use strict"
-
-function doBind(gl, elements, attributes) {
-  if(elements) {
-    elements.bind()
-  } else {
-    gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, null)
-  }
-  var nattribs = gl.getParameter(gl.MAX_VERTEX_ATTRIBS)|0
-  if(attributes) {
-    if(attributes.length > nattribs) {
-      throw new Error("gl-vao: Too many vertex attributes")
-    }
-    for(var i=0; i<attributes.length; ++i) {
-      var attrib = attributes[i]
-      if(attrib.buffer) {
-        var buffer = attrib.buffer
-        var size = attrib.size || 4
-        var type = attrib.type || gl.FLOAT
-        var normalized = !!attrib.normalized
-        var stride = attrib.stride || 0
-        var offset = attrib.offset || 0
-        buffer.bind()
-        gl.enableVertexAttribArray(i)
-        gl.vertexAttribPointer(i, size, type, normalized, stride, offset)
-      } else {
-        if(typeof attrib === "number") {
-          gl.vertexAttrib1f(i, attrib)
-        } else if(attrib.length === 1) {
-          gl.vertexAttrib1f(i, attrib[0])
-        } else if(attrib.length === 2) {
-          gl.vertexAttrib2f(i, attrib[0], attrib[1])
-        } else if(attrib.length === 3) {
-          gl.vertexAttrib3f(i, attrib[0], attrib[1], attrib[2])
-        } else if(attrib.length === 4) {
-          gl.vertexAttrib4f(i, attrib[0], attrib[1], attrib[2], attrib[3])
-        } else {
-          throw new Error("gl-vao: Invalid vertex attribute")
-        }
-        gl.disableVertexAttribArray(i)
-      }
-    }
-    for(; i<nattribs; ++i) {
-      gl.disableVertexAttribArray(i)
-    }
-  } else {
-    gl.bindBuffer(gl.ARRAY_BUFFER, null)
-    for(var i=0; i<nattribs; ++i) {
-      gl.disableVertexAttribArray(i)
-    }
-  }
-}
-
-module.exports = doBind
-},{}],35:[function(require,module,exports){
-"use strict"
-
-var bindAttribs = require("./do-bind.js")
-
-function VAOEmulated(gl) {
-  this.gl = gl
-  this._elements = null
-  this._attributes = null
-  this._elementsType = gl.UNSIGNED_SHORT
-}
-
-VAOEmulated.prototype.bind = function() {
-  bindAttribs(this.gl, this._elements, this._attributes)
-}
-
-VAOEmulated.prototype.update = function(attributes, elements, elementsType) {
-  this._elements = elements
-  this._attributes = attributes
-  this._elementsType = elementsType || this.gl.UNSIGNED_SHORT
-}
-
-VAOEmulated.prototype.dispose = function() { }
-VAOEmulated.prototype.unbind = function() { }
-
-VAOEmulated.prototype.draw = function(mode, count, offset) {
-  offset = offset || 0
-  var gl = this.gl
-  if(this._elements) {
-    gl.drawElements(mode, count, this._elementsType, offset)
-  } else {
-    gl.drawArrays(mode, offset, count)
-  }
-}
-
-function createVAOEmulated(gl) {
-  return new VAOEmulated(gl)
-}
-
-module.exports = createVAOEmulated
-},{"./do-bind.js":34}],36:[function(require,module,exports){
-"use strict"
-
-var bindAttribs = require("./do-bind.js")
-
-function VertexAttribute(location, dimension, a, b, c, d) {
-  this.location = location
-  this.dimension = dimension
-  this.a = a
-  this.b = b
-  this.c = c
-  this.d = d
-}
-
-VertexAttribute.prototype.bind = function(gl) {
-  switch(this.dimension) {
-    case 1:
-      gl.vertexAttrib1f(this.location, this.a)
-    break
-    case 2:
-      gl.vertexAttrib2f(this.location, this.a, this.b)
-    break
-    case 3:
-      gl.vertexAttrib3f(this.location, this.a, this.b, this.c)
-    break
-    case 4:
-      gl.vertexAttrib4f(this.location, this.a, this.b, this.c, this.d)
-    break
-  }
-}
-
-function VAONative(gl, ext, handle) {
-  this.gl = gl
-  this._ext = ext
-  this.handle = handle
-  this._attribs = []
-  this._useElements = false
-  this._elementsType = gl.UNSIGNED_SHORT
-}
-
-VAONative.prototype.bind = function() {
-  this._ext.bindVertexArrayOES(this.handle)
-  for(var i=0; i<this._attribs.length; ++i) {
-    this._attribs[i].bind(this.gl)
-  }
-}
-
-VAONative.prototype.unbind = function() {
-  this._ext.bindVertexArrayOES(null)
-}
-
-VAONative.prototype.dispose = function() {
-  this._ext.deleteVertexArrayOES(this.handle)
-}
-
-VAONative.prototype.update = function(attributes, elements, elementsType) {
-  this.bind()
-  bindAttribs(this.gl, elements, attributes)
-  this.unbind()
-  this._attribs.length = 0
-  if(attributes)
-  for(var i=0; i<attributes.length; ++i) {
-    var a = attributes[i]
-    if(typeof a === "number") {
-      this._attribs.push(new VertexAttribute(i, 1, a))
-    } else if(Array.isArray(a)) {
-      this._attribs.push(new VertexAttribute(i, a.length, a[0], a[1], a[2], a[3]))
-    }
-  }
-  this._useElements = !!elements
-  this._elementsType = elementsType || this.gl.UNSIGNED_SHORT
-}
-
-VAONative.prototype.draw = function(mode, count, offset) {
-  offset = offset || 0
-  var gl = this.gl
-  if(this._useElements) {
-    gl.drawElements(mode, count, this._elementsType, offset)
-  } else {
-    gl.drawArrays(mode, offset, count)
-  }
-}
-
-function createVAONative(gl, ext) {
-  return new VAONative(gl, ext, ext.createVertexArrayOES())
-}
-
-module.exports = createVAONative
-},{"./do-bind.js":34}],37:[function(require,module,exports){
-"use strict"
-
-var createVAONative = require("./lib/vao-native.js")
-var createVAOEmulated = require("./lib/vao-emulated.js")
-
-function ExtensionShim (gl) {
-  this.bindVertexArrayOES = gl.bindVertexArray.bind(gl)
-  this.createVertexArrayOES = gl.createVertexArray.bind(gl)
-  this.deleteVertexArrayOES = gl.deleteVertexArray.bind(gl)
-}
-
-function createVAO(gl, attributes, elements, elementsType) {
-  var ext = gl.createVertexArray
-    ? new ExtensionShim(gl)
-    : gl.getExtension('OES_vertex_array_object')
-  var vao
-
-  if(ext) {
-    vao = createVAONative(gl, ext)
-  } else {
-    vao = createVAOEmulated(gl)
-  }
-  vao.update(attributes, elements, elementsType)
-  return vao
-}
-
-module.exports = createVAO
-
-},{"./lib/vao-emulated.js":35,"./lib/vao-native.js":36}],38:[function(require,module,exports){
+},{"./GLError":28,"gl-format-compiler-error":16,"weakmap-shim":55}],34:[function(require,module,exports){
 var tokenize = require('glsl-tokenizer')
 var atob     = require('atob-lite')
 
@@ -11378,7 +11176,7 @@ function getName(src) {
   }
 }
 
-},{"atob-lite":3,"glsl-tokenizer":45}],39:[function(require,module,exports){
+},{"atob-lite":3,"glsl-tokenizer":41}],35:[function(require,module,exports){
 module.exports = tokenize
 
 var literals100 = require('./lib/literals')
@@ -11742,7 +11540,7 @@ function tokenize(opt) {
   }
 }
 
-},{"./lib/builtins":41,"./lib/builtins-300es":40,"./lib/literals":43,"./lib/literals-300es":42,"./lib/operators":44}],40:[function(require,module,exports){
+},{"./lib/builtins":37,"./lib/builtins-300es":36,"./lib/literals":39,"./lib/literals-300es":38,"./lib/operators":40}],36:[function(require,module,exports){
 // 300es builtins/reserved words that were previously valid in v100
 var v100 = require('./builtins')
 
@@ -11813,7 +11611,7 @@ module.exports = v100.concat([
   , 'textureProjGradOffset'
 ])
 
-},{"./builtins":41}],41:[function(require,module,exports){
+},{"./builtins":37}],37:[function(require,module,exports){
 module.exports = [
   // Keep this list sorted
   'abs'
@@ -11965,7 +11763,7 @@ module.exports = [
   , 'textureCubeGradEXT'
 ]
 
-},{}],42:[function(require,module,exports){
+},{}],38:[function(require,module,exports){
 var v100 = require('./literals')
 
 module.exports = v100.slice().concat([
@@ -12055,7 +11853,7 @@ module.exports = v100.slice().concat([
   , 'usampler2DMSArray'
 ])
 
-},{"./literals":43}],43:[function(require,module,exports){
+},{"./literals":39}],39:[function(require,module,exports){
 module.exports = [
   // current
     'precision'
@@ -12150,7 +11948,7 @@ module.exports = [
   , 'using'
 ]
 
-},{}],44:[function(require,module,exports){
+},{}],40:[function(require,module,exports){
 module.exports = [
     '<<='
   , '>>='
@@ -12199,7 +11997,7 @@ module.exports = [
   , '}'
 ]
 
-},{}],45:[function(require,module,exports){
+},{}],41:[function(require,module,exports){
 var tokenize = require('./index')
 
 module.exports = tokenizeString
@@ -12214,7 +12012,7 @@ function tokenizeString(str, opt) {
   return tokens
 }
 
-},{"./index":39}],46:[function(require,module,exports){
+},{"./index":35}],42:[function(require,module,exports){
 exports.read = function (buffer, offset, isLE, mLen, nBytes) {
   var e, m
   var eLen = nBytes * 8 - mLen - 1
@@ -12300,7 +12098,7 @@ exports.write = function (buffer, value, offset, isLE, mLen, nBytes) {
   buffer[offset + i - d] |= s * 128
 }
 
-},{}],47:[function(require,module,exports){
+},{}],43:[function(require,module,exports){
 "use strict"
 
 function iota(n) {
@@ -12312,7 +12110,7 @@ function iota(n) {
 }
 
 module.exports = iota
-},{}],48:[function(require,module,exports){
+},{}],44:[function(require,module,exports){
 /*!
  * Determine if an object is a Buffer
  *
@@ -12335,7 +12133,7 @@ function isSlowBuffer (obj) {
   return typeof obj.readFloatLE === 'function' && typeof obj.slice === 'function' && isBuffer(obj.slice(0, 0))
 }
 
-},{}],49:[function(require,module,exports){
+},{}],45:[function(require,module,exports){
 "use strict"
 
 var compile = require("cwise-compiler")
@@ -12798,7 +12596,7 @@ exports.equals = compile({
 
 
 
-},{"cwise-compiler":8}],50:[function(require,module,exports){
+},{"cwise-compiler":8}],46:[function(require,module,exports){
 var iota = require("iota-array")
 var isBuffer = require("is-buffer")
 
@@ -13143,7 +12941,7 @@ function wrappedNDArrayCtor(data, shape, stride, offset) {
 
 module.exports = wrappedNDArrayCtor
 
-},{"iota-array":47,"is-buffer":48}],51:[function(require,module,exports){
+},{"iota-array":43,"is-buffer":44}],47:[function(require,module,exports){
 /*!
  * pad-left <https://github.com/jonschlinkert/pad-left>
  *
@@ -13159,7 +12957,7 @@ module.exports = function padLeft(str, num, ch) {
   ch = typeof ch !== 'undefined' ? (ch + '') : ' ';
   return repeat(ch, num) + str;
 };
-},{"repeat-string":52}],52:[function(require,module,exports){
+},{"repeat-string":48}],48:[function(require,module,exports){
 /*!
  * repeat-string <https://github.com/jonschlinkert/repeat-string>
  *
@@ -13229,7 +13027,7 @@ function repeat(str, num) {
 }
 
 
-},{}],53:[function(require,module,exports){
+},{}],49:[function(require,module,exports){
 (function(window) {
     var re = {
         not_string: /[^s]/,
@@ -13439,14 +13237,14 @@ function repeat(str, num) {
     }
 })(typeof window === "undefined" ? this : window);
 
-},{}],54:[function(require,module,exports){
+},{}],50:[function(require,module,exports){
 // stats.js - http://github.com/mrdoob/stats.js
 var Stats=function(){function h(a){c.appendChild(a.dom);return a}function k(a){for(var d=0;d<c.children.length;d++)c.children[d].style.display=d===a?"block":"none";l=a}var l=0,c=document.createElement("div");c.style.cssText="position:fixed;top:0;left:0;cursor:pointer;opacity:0.9;z-index:10000";c.addEventListener("click",function(a){a.preventDefault();k(++l%c.children.length)},!1);var g=(performance||Date).now(),e=g,a=0,r=h(new Stats.Panel("FPS","#0ff","#002")),f=h(new Stats.Panel("MS","#0f0","#020"));
 if(self.performance&&self.performance.memory)var t=h(new Stats.Panel("MB","#f08","#201"));k(0);return{REVISION:16,dom:c,addPanel:h,showPanel:k,begin:function(){g=(performance||Date).now()},end:function(){a++;var c=(performance||Date).now();f.update(c-g,200);if(c>e+1E3&&(r.update(1E3*a/(c-e),100),e=c,a=0,t)){var d=performance.memory;t.update(d.usedJSHeapSize/1048576,d.jsHeapSizeLimit/1048576)}return c},update:function(){g=this.end()},domElement:c,setMode:k}};
 Stats.Panel=function(h,k,l){var c=Infinity,g=0,e=Math.round,a=e(window.devicePixelRatio||1),r=80*a,f=48*a,t=3*a,u=2*a,d=3*a,m=15*a,n=74*a,p=30*a,q=document.createElement("canvas");q.width=r;q.height=f;q.style.cssText="width:80px;height:48px";var b=q.getContext("2d");b.font="bold "+9*a+"px Helvetica,Arial,sans-serif";b.textBaseline="top";b.fillStyle=l;b.fillRect(0,0,r,f);b.fillStyle=k;b.fillText(h,t,u);b.fillRect(d,m,n,p);b.fillStyle=l;b.globalAlpha=.9;b.fillRect(d,m,n,p);return{dom:q,update:function(f,
 v){c=Math.min(c,f);g=Math.max(g,f);b.fillStyle=l;b.globalAlpha=1;b.fillRect(0,0,r,m);b.fillStyle=k;b.fillText(e(f)+" "+h+" ("+e(c)+"-"+e(g)+")",t,u);b.drawImage(q,d+a,m,n-a,p,d,m,n-a,p);b.fillRect(d+n-a,m,a,p);b.fillStyle=l;b.globalAlpha=.9;b.fillRect(d+n-a,m,a,e((1-f/v)*p))}}};"object"===typeof module&&(module.exports=Stats);
 
-},{}],55:[function(require,module,exports){
+},{}],51:[function(require,module,exports){
 (function (global,Buffer){
 'use strict'
 
@@ -13663,7 +13461,7 @@ exports.clearCache = function clearCache() {
   }
 }
 }).call(this,typeof global !== "undefined" ? global : typeof self !== "undefined" ? self : typeof window !== "undefined" ? window : {},require("buffer").Buffer)
-},{"bit-twiddle":5,"buffer":6,"dup":11}],56:[function(require,module,exports){
+},{"bit-twiddle":5,"buffer":6,"dup":11}],52:[function(require,module,exports){
 "use strict"
 
 function unique_pred(list, compare) {
@@ -13722,7 +13520,7 @@ function unique(list, compare, sorted) {
 
 module.exports = unique
 
-},{}],57:[function(require,module,exports){
+},{}],53:[function(require,module,exports){
 var hiddenStore = require('./hidden-store.js');
 
 module.exports = createStore;
@@ -13743,7 +13541,7 @@ function createStore() {
     };
 }
 
-},{"./hidden-store.js":58}],58:[function(require,module,exports){
+},{"./hidden-store.js":54}],54:[function(require,module,exports){
 module.exports = hiddenStore;
 
 function hiddenStore(obj, key) {
@@ -13761,7 +13559,7 @@ function hiddenStore(obj, key) {
     return store;
 }
 
-},{}],59:[function(require,module,exports){
+},{}],55:[function(require,module,exports){
 // Original - @Gozola. 
 // https://gist.github.com/Gozala/1269991
 // This is a reimplemented version (with a few bug fixes).
@@ -13791,4 +13589,4 @@ function weakMap() {
     }
 }
 
-},{"./create-store.js":57}]},{},[1]);
+},{"./create-store.js":53}]},{},[1]);
