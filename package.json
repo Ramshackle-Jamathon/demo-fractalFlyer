@@ -18,14 +18,14 @@
     "gl-buffer": "^2.1.2",
     "gl-matrix": "^2.3.2",
     "gl-shader": "^4.2.0",
-    "gl-flyCamera": "^1.0.0",
+    "gl-flyCamera": "^1.0.2",
     "glslify": "^6.0.1",
     "glslify-hex": "^2.1.1",
     "stats.js": "^0.17.0"
   },
   "devDependencies": {
     "browserify": "^13.3.0",
-    "budo": "^9.2.1"
+    "budo": "^9.4.1"
   },
   "browserify": {
     "transform": [
