@@ -16,7 +16,7 @@
   },
   "dependencies": {
     "gl-buffer": "^2.1.2",
-    "gl-matrix": "^2.3.2",
+    "gl-matrix": "^2.4.0",
     "gl-shader": "^4.2.0",
     "gl-flyCamera": "^1.0.2",
     "glslify": "^6.0.1",
